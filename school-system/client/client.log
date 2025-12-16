@@ -1,0 +1,11 @@
+
+> client@1.0.0 dev
+> vite --host
+
+
+  VITE v5.4.21  ready in 223 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.0.2:5173/
+(node:5704) Warning: Failed to load the ES module: /app/school-system/client/tailwind.config.js. Make sure to set "type": "module" in the nearest package.json file or use the .mjs extension.
+(Use `node --trace-warnings ...` to show where the warning was created)

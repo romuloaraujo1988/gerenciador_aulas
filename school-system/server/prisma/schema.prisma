@@ -1,0 +1,92 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Escola {
+  id      Int      @id @default(autoincrement())
+  nome    String
+  turmas  Turma[]
+}
+
+model Turma {
+  id        Int      @id @default(autoincrement())
+  nome      String
+  escolaId  Int
+  escola    Escola   @relation(fields: [escolaId], references: [id])
+  alunos    Aluno[]
+  disciplinas Disciplina[]
+}
+
+model Aluno {
+  id        Int      @id @default(autoincrement())
+  nome      String
+  turmaId   Int
+  turma     Turma    @relation(fields: [turmaId], references: [id])
+  notas     Nota[]
+  presencas Presenca[]
+}
+
+model Disciplina {
+  id        Int      @id @default(autoincrement())
+  nome      String
+  turmaId   Int
+  turma     Turma    @relation(fields: [turmaId], references: [id])
+  atividades Atividade[]
+  chamadas   Chamada[]
+  configs    ConfiguracaoBimestre[]
+}
+
+model ConfiguracaoBimestre {
+  id           Int      @id @default(autoincrement())
+  disciplinaId Int
+  disciplina   Disciplina @relation(fields: [disciplinaId], references: [id])
+  bimestre     Int
+  formula      String   // "SOMA", "MEDIA", "CUSTOM_TRABALHO_PROVA"
+  meta         String?  // JSON extra para pesos
+}
+
+model Atividade {
+  id           Int      @id @default(autoincrement())
+  nome         String
+  data         DateTime
+  bimestre     Int
+  categoria    String   // "TRABALHO", "PROVA", "CONCEITO"
+  valorMaximo  Float
+  disciplinaId Int
+  disciplina   Disciplina @relation(fields: [disciplinaId], references: [id])
+  notas        Nota[]
+}
+
+model Nota {
+  id          Int       @id @default(autoincrement())
+  valor       Float
+  alunoId     Int
+  aluno       Aluno     @relation(fields: [alunoId], references: [id])
+  atividadeId Int
+  atividade   Atividade @relation(fields: [atividadeId], references: [id])
+}
+
+model Chamada {
+  id           Int        @id @default(autoincrement())
+  data         DateTime
+  disciplinaId Int
+  disciplina   Disciplina @relation(fields: [disciplinaId], references: [id])
+  presencas    Presenca[]
+}
+
+model Presenca {
+  id        Int      @id @default(autoincrement())
+  presente  Boolean
+  alunoId   Int
+  aluno     Aluno    @relation(fields: [alunoId], references: [id])
+  chamadaId Int
+  chamada   Chamada  @relation(fields: [chamadaId], references: [id])
+}

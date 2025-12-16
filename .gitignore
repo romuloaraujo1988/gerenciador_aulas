@@ -1,0 +1,5 @@
+**/node_modules
+**/dist
+**/.env
+school-system/server/node_modules
+school-system/client/node_modules
