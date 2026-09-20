@@ -28,6 +28,8 @@ model Turma {
 model Aluno {
   id        Int      @id @default(autoincrement())
   nome      String
+  login     String?  @unique
+  senha     String?
   turmaId   Int
   turma     Turma    @relation(fields: [turmaId], references: [id])
   notas     Nota[]
@@ -58,7 +60,9 @@ model Atividade {
   nome         String
   data         DateTime
   bimestre     Int
-  categoria    String   // "TRABALHO", "PROVA", "CONCEITO"
+  categoria    String   // "TRABALHO", "PROVA", "CONCEITO", "QUIZ_IA", "FLASHCARD_IA"
+  tipo         String?  // null para normal, "QUIZ", "FLASHCARD"
+  conteudo     String?  // JSON stringificado para armazenar as questoes e respostas
   valorMaximo  Float
   disciplinaId Int
   disciplina   Disciplina @relation(fields: [disciplinaId], references: [id])
