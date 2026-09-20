@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Settings, Plus, Save } from 'lucide-react';
+import { Settings, Plus, Save, Sparkles } from 'lucide-react';
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -16,6 +16,13 @@ export default function GradesModule({ disciplina }) {
   const [newActName, setNewActName] = useState('');
   const [newActCat, setNewActCat] = useState('TRABALHO');
   const [newActMax, setNewActMax] = useState(10);
+
+  // IA Activity Form
+  const [showIAGenerator, setShowIAGenerator] = useState(false);
+  const [temaIA, setTemaIA] = useState('');
+  const [tipoIA, setTipoIA] = useState('QUIZ');
+  const [loadingIA, setLoadingIA] = useState(false);
+  const [geradoIA, setGeradoIA] = useState(null);
 
   useEffect(() => {
     if (disciplina?.turma?.alunos) {
@@ -46,6 +53,62 @@ export default function GradesModule({ disciplina }) {
     });
     setNewActName('');
     carregarDados();
+  };
+
+  const gerarAtividadeIA = async (e) => {
+    e.preventDefault();
+    setLoadingIA(true);
+    setGeradoIA(null);
+    try {
+      const res = await axios.post(`${API_URL}/ia/gerar-atividade`, {
+        tema: temaIA,
+        tipo: tipoIA
+      });
+      setGeradoIA(res.data);
+    } catch (error) {
+      console.error(error);
+      alert('Erro ao gerar atividade com IA. Verifique a chave da API.');
+    } finally {
+      setLoadingIA(false);
+    }
+  };
+
+  const salvarAtividadeIA = async () => {
+    if (!geradoIA) return;
+
+    await axios.post(`${API_URL}/atividades`, {
+        nome: geradoIA.titulo || `Atividade de IA - ${temaIA}`,
+        categoria: tipoIA === 'QUIZ' ? 'QUIZ_IA' : 'FLASHCARD_IA',
+        tipo: tipoIA,
+        conteudo: geradoIA,
+        valorMaximo: 10, // Default for IA games
+        bimestre: activeBimester,
+        data: new Date(),
+        disciplinaId: disciplina.id
+    });
+
+    setShowIAGenerator(false);
+    setTemaIA('');
+    setGeradoIA(null);
+    carregarDados();
+  };
+
+  const updateQuizQuestion = (qIndex, field, value) => {
+    const updated = { ...geradoIA };
+    updated.questoes[qIndex][field] = value;
+    setGeradoIA(updated);
+  };
+
+  const updateQuizOption = (qIndex, optIndex, value) => {
+    const updated = { ...geradoIA };
+    updated.questoes[qIndex].opcoes[optIndex] = value;
+    setGeradoIA(updated);
+  };
+
+  const updateFlashcard = (cIndex, field, value) => {
+    const updated = { ...geradoIA };
+    updated.cards[cIndex][field] = value;
+    setGeradoIA(updated);
   };
 
   const salvarNota = async (alunoId, atividadeId, valor) => {
@@ -115,9 +178,131 @@ export default function GradesModule({ disciplina }) {
             </div>
         )}
 
-        {/* Create Activity */}
+        <div className="flex gap-4 mb-6">
+            <button
+                onClick={() => setShowIAGenerator(true)}
+                className="bg-purple-600 text-white px-4 py-2 rounded flex items-center shadow hover:bg-purple-700 transition"
+            >
+                <Sparkles size={18} className="mr-2" /> Gerar Jogo com IA
+            </button>
+        </div>
+
+        {/* Modal/Formulário de IA */}
+        {showIAGenerator && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+                <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl mt-10">
+                    <h3 className="text-xl font-bold mb-4 text-purple-700 flex items-center">
+                        <Sparkles size={24} className="mr-2" /> Criar Jogo com Inteligência Artificial
+                    </h3>
+
+                    {!geradoIA && (
+                        <form onSubmit={gerarAtividadeIA}>
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium mb-1">Tema da Atividade</label>
+                                <input
+                                    type="text"
+                                    value={temaIA}
+                                    onChange={(e) => setTemaIA(e.target.value)}
+                                    placeholder="Ex: Revolução Industrial, Equações de 2º Grau..."
+                                    className="w-full p-3 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                                    required
+                                />
+                            </div>
+                            <div className="mb-6">
+                                <label className="block text-sm font-medium mb-1">Formato do Jogo</label>
+                                <select
+                                    value={tipoIA}
+                                    onChange={(e) => setTipoIA(e.target.value)}
+                                    className="w-full p-3 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                                >
+                                    <option value="QUIZ">Quiz Interativo (Múltipla Escolha)</option>
+                                    <option value="FLASHCARD">Flashcards (Memorização)</option>
+                                </select>
+                            </div>
+
+                            <div className="flex justify-end gap-2">
+                                <button type="button" onClick={() => setShowIAGenerator(false)} className="px-4 py-2 text-gray-600 border rounded hover:bg-gray-100">Cancelar</button>
+                                <button type="submit" disabled={loadingIA} className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center">
+                                    {loadingIA ? 'Gerando...' : 'Gerar com IA'}
+                                </button>
+                            </div>
+                        </form>
+                    )}
+
+                    {geradoIA && (
+                        <div>
+                            <div className="bg-green-50 border border-green-200 p-4 rounded mb-4 max-h-96 overflow-y-auto">
+                                <h4 className="font-bold text-green-800 mb-2">Sucesso! Pré-visualização gerada:</h4>
+                                <h5 className="font-bold text-lg">{geradoIA.titulo}</h5>
+
+                                {tipoIA === 'QUIZ' && geradoIA.questoes?.map((q, idx) => (
+                                    <div key={idx} className="mt-3 p-3 bg-white rounded border">
+                                        <div className="flex items-center mb-2">
+                                          <span className="font-bold mr-2">{idx + 1}.</span>
+                                          <input
+                                            className="w-full border p-1 rounded font-semibold text-gray-800"
+                                            value={q.pergunta}
+                                            onChange={(e) => updateQuizQuestion(idx, 'pergunta', e.target.value)}
+                                          />
+                                        </div>
+                                        <div className="mt-2 space-y-2 pl-6">
+                                            {q.opcoes.map((op, i) => (
+                                                <div key={i} className="flex items-center">
+                                                    <input
+                                                      type="radio"
+                                                      checked={q.respostaCorretaIndex === i}
+                                                      onChange={() => updateQuizQuestion(idx, 'respostaCorretaIndex', i)}
+                                                      className="mr-2"
+                                                      name={`questao_${idx}`}
+                                                    />
+                                                    <input
+                                                      className={`w-full border p-1 rounded text-sm ${q.respostaCorretaIndex === i ? 'border-green-400 bg-green-50' : ''}`}
+                                                      value={op}
+                                                      onChange={(e) => updateQuizOption(idx, i, e.target.value)}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {tipoIA === 'FLASHCARD' && geradoIA.cards?.map((c, idx) => (
+                                    <div key={idx} className="mt-3 flex gap-2">
+                                        <div className="flex-1">
+                                          <span className="text-xs text-blue-500 font-bold block mb-1">Frente</span>
+                                          <textarea
+                                            className="w-full p-2 bg-blue-50 border rounded text-sm h-20"
+                                            value={c.frente}
+                                            onChange={(e) => updateFlashcard(idx, 'frente', e.target.value)}
+                                          />
+                                        </div>
+                                        <div className="flex-1">
+                                          <span className="text-xs text-yellow-600 font-bold block mb-1">Verso</span>
+                                          <textarea
+                                            className="w-full p-2 bg-yellow-50 border rounded text-sm h-20"
+                                            value={c.verso}
+                                            onChange={(e) => updateFlashcard(idx, 'verso', e.target.value)}
+                                          />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={() => setGeradoIA(null)} className="px-4 py-2 text-gray-600 border rounded hover:bg-gray-100">Gerar Novamente</button>
+                                <button onClick={salvarAtividadeIA} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center">
+                                    <Save size={18} className="mr-2" /> Salvar Atividade para os Alunos
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* Create Activity (Manual) */}
         <div className="bg-white p-4 mb-6 border rounded shadow-sm">
-            <h4 className="font-bold mb-2 text-sm uppercase text-gray-500">Nova Atividade</h4>
+            <h4 className="font-bold mb-2 text-sm uppercase text-gray-500">Nova Avaliação Manual</h4>
             <form onSubmit={criarAtividade} className="flex gap-4 items-end flex-wrap">
                 <div>
                     <label className="block text-xs mb-1">Nome</label>

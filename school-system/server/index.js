@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const bcrypt = require('bcrypt');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -51,11 +53,30 @@ app.post('/api/turmas', async (req, res) => {
 
 // --- Alunos ---
 app.post('/api/alunos', async (req, res) => {
-  const { nome, turmaId } = req.body;
-  const aluno = await prisma.aluno.create({
-    data: { nome, turmaId: Number(turmaId) }
-  });
-  res.json(aluno);
+  const { nome, turmaId, login, senha } = req.body;
+  try {
+    let hashedSenha = null;
+    if (senha) {
+      hashedSenha = await bcrypt.hash(senha, 10);
+    }
+
+    const aluno = await prisma.aluno.create({
+      data: {
+        nome,
+        turmaId: Number(turmaId),
+        login,
+        senha: hashedSenha
+      }
+    });
+    // Remove senha from response
+    const { senha: _, ...alunoSemSenha } = aluno;
+    res.json(alunoSemSenha);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Login já existe' });
+    }
+    res.status(500).json({ error: 'Erro ao criar aluno' });
+  }
 });
 
 app.get('/api/turmas/:id/alunos', async (req, res) => {
@@ -110,9 +131,112 @@ app.post('/api/configuracoes', async (req, res) => {
   res.json(config);
 });
 
+// --- Login de Aluno ---
+app.post('/api/auth/aluno', async (req, res) => {
+  const { login, senha } = req.body;
+  if (!login || !senha) {
+    return res.status(400).json({ error: 'Login e senha são obrigatórios' });
+  }
+
+  const aluno = await prisma.aluno.findUnique({
+    where: { login },
+    include: { turma: { include: { disciplinas: true } } }
+  });
+
+  if (!aluno || !aluno.senha) {
+    return res.status(401).json({ error: 'Credenciais inválidas' });
+  }
+
+  const validPassword = await bcrypt.compare(senha, aluno.senha);
+  if (!validPassword) {
+      // Para retrocompatibilidade com alunos criados antes do hash
+      if (aluno.senha === senha) {
+          // Opcional: atualizar a senha para hash aqui
+      } else {
+          return res.status(401).json({ error: 'Credenciais inválidas' });
+      }
+  }
+
+  // Remove a senha antes de enviar para o frontend
+  const { senha: _, ...alunoSemSenha } = aluno;
+  res.json(alunoSemSenha);
+});
+
+// --- IA: Gerar Atividade ---
+app.post('/api/ia/gerar-atividade', async (req, res) => {
+  const { tema, tipo, faixaEtaria = '14 a 18 anos' } = req.body;
+
+  if (!tema || !tipo) {
+    return res.status(400).json({ error: 'Tema e tipo são obrigatórios' });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Chave da API do Gemini não configurada' });
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', generationConfig: { responseMimeType: "application/json" } });
+
+    let prompt = '';
+    if (tipo === 'QUIZ') {
+      prompt = `Crie um quiz interativo e divertido para adolescentes de ${faixaEtaria} sobre o tema "${tema}".
+      Retorne APENAS um JSON válido no seguinte formato:
+      {
+        "titulo": "Nome do Quiz",
+        "questoes": [
+          {
+            "pergunta": "Texto da pergunta",
+            "opcoes": ["Opção A", "Opção B", "Opção C", "Opção D"],
+            "respostaCorretaIndex": 0,
+            "feedbackCorreto": "Mensagem motivacional de acerto",
+            "feedbackIncorreto": "Mensagem explicativa do erro"
+          }
+        ]
+      }
+      Certifique-se de incluir no mínimo 3 e no máximo 5 questões.`;
+    } else if (tipo === 'FLASHCARD') {
+      prompt = `Crie uma série de flashcards interativos para adolescentes de ${faixaEtaria} sobre o tema "${tema}".
+      Retorne APENAS um JSON válido no seguinte formato:
+      {
+        "titulo": "Nome dos Flashcards",
+        "cards": [
+          {
+            "frente": "Conceito ou Pergunta",
+            "verso": "Definição ou Resposta detalhada"
+          }
+        ]
+      }
+      Certifique-se de incluir no mínimo 5 e no máximo 8 cards.`;
+    } else {
+      return res.status(400).json({ error: 'Tipo de atividade não suportado' });
+    }
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+
+    // Parse the JSON to ensure it's valid before returning
+    const parsedData = JSON.parse(responseText);
+    res.json(parsedData);
+  } catch (error) {
+    console.error('Erro ao gerar atividade com IA:', error);
+    res.status(500).json({ error: 'Erro ao gerar atividade com IA', detalhes: error.message });
+  }
+});
+
 // --- Atividades ---
+app.get('/api/atividades/:id', async (req, res) => {
+  const { id } = req.params;
+  const atividade = await prisma.atividade.findUnique({
+    where: { id: Number(id) }
+  });
+  if (!atividade) return res.status(404).json({ error: 'Atividade não encontrada' });
+  res.json(atividade);
+});
+
 app.post('/api/atividades', async (req, res) => {
-  const { nome, data, bimestre, categoria, valorMaximo, disciplinaId } = req.body;
+  const { nome, data, bimestre, categoria, valorMaximo, disciplinaId, tipo, conteudo } = req.body;
   const atividade = await prisma.atividade.create({
     data: {
       nome,
@@ -120,7 +244,9 @@ app.post('/api/atividades', async (req, res) => {
       bimestre: Number(bimestre),
       categoria,
       valorMaximo: Number(valorMaximo),
-      disciplinaId: Number(disciplinaId)
+      disciplinaId: Number(disciplinaId),
+      tipo,
+      conteudo: conteudo ? JSON.stringify(conteudo) : null
     }
   });
   res.json(atividade);

@@ -1,11 +1,14 @@
 
 > client@1.0.0 dev
-> vite --host
+> vite
 
 
-  VITE v5.4.21  ready in 223 ms
+  VITE v5.4.21  ready in 249 ms
 
   ➜  Local:   http://localhost:5173/
-  ➜  Network: http://192.168.0.2:5173/
-(node:5704) Warning: Failed to load the ES module: /app/school-system/client/tailwind.config.js. Make sure to set "type": "module" in the nearest package.json file or use the .mjs extension.
+  ➜  Network: use --host to expose
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+(node:299173) Warning: Failed to load the ES module: /app/school-system/client/tailwind.config.js. Make sure to set "type": "module" in the nearest package.json file or use the .mjs extension.
 (Use `node --trace-warnings ...` to show where the warning was created)
