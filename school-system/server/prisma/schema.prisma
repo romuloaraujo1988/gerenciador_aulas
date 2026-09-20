@@ -64,6 +64,7 @@ model Atividade {
   tipo         String?  // null para normal, "QUIZ", "FLASHCARD"
   conteudo     String?  // JSON stringificado para armazenar as questoes e respostas
   valorMaximo  Float
+  permiteVariasTentativas Boolean @default(false)
   disciplinaId Int
   disciplina   Disciplina @relation(fields: [disciplinaId], references: [id])
   notas        Nota[]

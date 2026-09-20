@@ -23,6 +23,7 @@ export default function GradesModule({ disciplina }) {
   const [tipoIA, setTipoIA] = useState('QUIZ');
   const [loadingIA, setLoadingIA] = useState(false);
   const [geradoIA, setGeradoIA] = useState(null);
+  const [permiteVariasTentativas, setPermiteVariasTentativas] = useState(false);
 
   useEffect(() => {
     if (disciplina?.turma?.alunos) {
@@ -84,7 +85,8 @@ export default function GradesModule({ disciplina }) {
         valorMaximo: 10, // Default for IA games
         bimestre: activeBimester,
         data: new Date(),
-        disciplinaId: disciplina.id
+        disciplinaId: disciplina.id,
+        permiteVariasTentativas
     });
 
     setShowIAGenerator(false);
@@ -108,6 +110,18 @@ export default function GradesModule({ disciplina }) {
   const updateFlashcard = (cIndex, field, value) => {
     const updated = { ...geradoIA };
     updated.cards[cIndex][field] = value;
+    setGeradoIA(updated);
+  };
+
+  const updateFillBlanks = (fIndex, field, value) => {
+    const updated = { ...geradoIA };
+    updated.frases[fIndex][field] = value;
+    setGeradoIA(updated);
+  };
+
+  const updateFillBlanksFalsas = (fIndex, optIndex, value) => {
+    const updated = { ...geradoIA };
+    updated.frases[fIndex].opcoesFalsas[optIndex] = value;
     setGeradoIA(updated);
   };
 
@@ -217,6 +231,7 @@ export default function GradesModule({ disciplina }) {
                                 >
                                     <option value="QUIZ">Quiz Interativo (Múltipla Escolha)</option>
                                     <option value="FLASHCARD">Flashcards (Memorização)</option>
+                                    <option value="FILL_BLANKS">Preencher Lacunas</option>
                                 </select>
                             </div>
 
@@ -266,6 +281,42 @@ export default function GradesModule({ disciplina }) {
                                     </div>
                                 ))}
 
+                                {tipoIA === 'FILL_BLANKS' && geradoIA.frases?.map((f, idx) => (
+                                    <div key={idx} className="mt-3 p-3 bg-white rounded border">
+                                        <div className="mb-2">
+                                          <span className="text-xs text-purple-600 font-bold block mb-1">Frase com ___ (lacuna)</span>
+                                          <input
+                                            className="w-full border p-1 rounded text-sm"
+                                            value={f.textoComLacuna}
+                                            onChange={(e) => updateFillBlanks(idx, 'textoComLacuna', e.target.value)}
+                                          />
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <div className="w-1/3">
+                                            <span className="text-xs text-green-600 font-bold block mb-1">Palavra Correta</span>
+                                            <input
+                                              className="w-full border border-green-300 bg-green-50 p-1 rounded text-sm"
+                                              value={f.palavraCorreta}
+                                              onChange={(e) => updateFillBlanks(idx, 'palavraCorreta', e.target.value)}
+                                            />
+                                          </div>
+                                          <div className="w-2/3">
+                                            <span className="text-xs text-red-600 font-bold block mb-1">Opções Falsas</span>
+                                            <div className="flex gap-1">
+                                              {f.opcoesFalsas.map((opt, optIdx) => (
+                                                <input
+                                                  key={optIdx}
+                                                  className="w-full border border-red-200 bg-red-50 p-1 rounded text-sm"
+                                                  value={opt}
+                                                  onChange={(e) => updateFillBlanksFalsas(idx, optIdx, e.target.value)}
+                                                />
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                    </div>
+                                ))}
+
                                 {tipoIA === 'FLASHCARD' && geradoIA.cards?.map((c, idx) => (
                                     <div key={idx} className="mt-3 flex gap-2">
                                         <div className="flex-1">
@@ -288,11 +339,22 @@ export default function GradesModule({ disciplina }) {
                                 ))}
                             </div>
 
-                            <div className="flex justify-end gap-2 mt-4">
-                                <button onClick={() => setGeradoIA(null)} className="px-4 py-2 text-gray-600 border rounded hover:bg-gray-100">Gerar Novamente</button>
-                                <button onClick={salvarAtividadeIA} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center">
-                                    <Save size={18} className="mr-2" /> Salvar Atividade para os Alunos
-                                </button>
+                            <div className="flex flex-col md:flex-row justify-between items-center mt-6 p-4 bg-gray-50 border-t rounded-b-lg">
+                                <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer mb-4 md:mb-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={permiteVariasTentativas}
+                                        onChange={(e) => setPermiteVariasTentativas(e.target.checked)}
+                                        className="mr-2 h-4 w-4 text-purple-600 rounded"
+                                    />
+                                    Permitir que o aluno jogue múltiplas vezes (Salva a maior pontuação)
+                                </label>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setGeradoIA(null)} className="px-4 py-2 text-gray-600 border rounded hover:bg-gray-100">Gerar Novamente</button>
+                                    <button onClick={salvarAtividadeIA} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center">
+                                        <Save size={18} className="mr-2" /> Salvar Atividade
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

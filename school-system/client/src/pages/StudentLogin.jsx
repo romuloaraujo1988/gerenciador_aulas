@@ -18,9 +18,12 @@ export default function StudentLogin() {
 
     try {
       const res = await axios.post(`${API_URL}/auth/aluno`, { login, senha });
-      // In a real app, use JWT and localStorage/Cookies securely.
-      // For this simple system, we just store the user data in localStorage.
-      localStorage.setItem('alunoData', JSON.stringify(res.data));
+      localStorage.setItem('alunoData', JSON.stringify(res.data.aluno));
+      localStorage.setItem('alunoToken', res.data.token);
+
+      // Configurar interceptor para enviar token nas próximas requisições
+      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+
       navigate('/aluno/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Erro ao realizar login. Verifique suas credenciais.');

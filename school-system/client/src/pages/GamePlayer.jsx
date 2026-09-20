@@ -17,6 +17,9 @@ export default function GamePlayer() {
   // Game State
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [score, setScore] = useState(0);
+
+  // Fill Blanks State
+  const [shuffledOptions, setShuffledOptions] = useState([]);
   const [showResult, setShowResult] = useState(false);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [isAnswerCorrect, setIsAnswerCorrect] = useState(null);
@@ -36,15 +39,16 @@ export default function GamePlayer() {
 
   const carregarAtividade = async () => {
     try {
-      // Como não temos um endpoint para uma atividade específica, buscamos as disciplinas e iteramos
-      // Em um app real, o ideal é criar app.get('/api/atividades/:id')
-      // Vamos tentar buscar a atividade via endpoint (iremos criar no backend se não houver, mas por hora vamos fazer um workaround buscando todas e filtrando)
       const res = await axios.get(`${API_URL}/atividades/${atividadeId}`);
 
       const ativ = res.data;
       setAtividade(ativ);
       if (ativ.conteudo) {
-        setConteudo(JSON.parse(ativ.conteudo));
+        const parsedConteudo = JSON.parse(ativ.conteudo);
+        setConteudo(parsedConteudo);
+        if (ativ.tipo === 'FILL_BLANKS') {
+          prepareFillBlanksOptions(parsedConteudo, 0);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -68,16 +72,48 @@ export default function GamePlayer() {
     }
   };
 
+  const prepareFillBlanksOptions = (cont, qIndex) => {
+    if (!cont || !cont.frases || !cont.frases[qIndex]) return;
+
+    const frase = cont.frases[qIndex];
+    const opts = [frase.palavraCorreta, ...frase.opcoesFalsas];
+
+    // Fisher-Yates shuffle
+    for (let i = opts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [opts[i], opts[j]] = [opts[j], opts[i]];
+    }
+
+    setShuffledOptions(opts);
+  };
+
   const handleNextQuestion = () => {
     setSelectedAnswer(null);
     setIsAnswerCorrect(null);
 
     const nextQuestion = currentQuestion + 1;
-    if (nextQuestion < conteudo.questoes.length) {
+    const maxQuestions = atividade.tipo === 'QUIZ' ? conteudo.questoes.length : (atividade.tipo === 'FILL_BLANKS' ? conteudo.frases.length : 0);
+
+    if (nextQuestion < maxQuestions) {
       setCurrentQuestion(nextQuestion);
+      if (atividade.tipo === 'FILL_BLANKS') {
+        prepareFillBlanksOptions(conteudo, nextQuestion);
+      }
     } else {
       finishGame();
     }
+  };
+
+  const handleFillBlanksAnswerClick = (optionStr) => {
+      if (selectedAnswer !== null) return;
+
+      setSelectedAnswer(optionStr);
+      const correct = optionStr === conteudo.frases[currentQuestion].palavraCorreta;
+      setIsAnswerCorrect(correct);
+
+      if (correct) {
+          setScore(score + 1);
+      }
   };
 
   const finishGame = async (pontosPersonalizados = null) => {
@@ -86,6 +122,9 @@ export default function GamePlayer() {
 
     if (atividade.tipo === 'QUIZ') {
       const maxScore = conteudo.questoes.length;
+      pontosCalculados = (finalScore / maxScore) * atividade.valorMaximo;
+    } else if (atividade.tipo === 'FILL_BLANKS') {
+      const maxScore = conteudo.frases.length;
       pontosCalculados = (finalScore / maxScore) * atividade.valorMaximo;
     } else if (atividade.tipo === 'FLASHCARD') {
       pontosCalculados = atividade.valorMaximo; // Fez os flashcards, ganha nota máxima
@@ -187,6 +226,81 @@ export default function GamePlayer() {
         </div>
       )}
 
+      {/* FILL BLANKS INTERFACE */}
+      {atividade.tipo === 'FILL_BLANKS' && !showResult && (
+        <div className="bg-white rounded-xl shadow-lg p-6 md:p-10 border-t-8 border-green-500">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">{conteudo.titulo}</h2>
+            <div className="bg-green-100 text-green-800 px-4 py-2 rounded-full font-bold">
+              Frase {currentQuestion + 1} de {conteudo.frases.length}
+            </div>
+          </div>
+
+          <div className="mb-10 text-center py-8 bg-gray-50 rounded-lg">
+            <h3 className="text-2xl md:text-3xl font-medium text-gray-700 leading-relaxed">
+              {conteudo.frases[currentQuestion].textoComLacuna.split('___').map((part, idx, array) => (
+                <React.Fragment key={idx}>
+                  {part}
+                  {idx < array.length - 1 && (
+                    <span className={`inline-block mx-2 min-w-[120px] px-4 py-1 border-b-4 ${selectedAnswer !== null ? (isAnswerCorrect ? 'border-green-500 text-green-700 bg-green-50' : 'border-red-500 text-red-700 bg-red-50') : 'border-gray-400 text-gray-300'}`}>
+                        {selectedAnswer !== null ? selectedAnswer : '????'}
+                    </span>
+                  )}
+                </React.Fragment>
+              ))}
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            {shuffledOptions.map((opcao, index) => {
+              let buttonClass = "p-4 rounded-lg border-2 font-bold text-lg transition-all shadow-sm ";
+
+              if (selectedAnswer === null) {
+                buttonClass += "border-gray-200 hover:border-green-500 hover:bg-green-50 text-gray-700 bg-white";
+              } else {
+                if (opcao === conteudo.frases[currentQuestion].palavraCorreta) {
+                  buttonClass += "bg-green-100 border-green-500 text-green-800";
+                } else if (opcao === selectedAnswer) {
+                  buttonClass += "bg-red-100 border-red-500 text-red-800 opacity-50";
+                } else {
+                  buttonClass += "border-gray-200 opacity-50 bg-gray-50";
+                }
+              }
+
+              return (
+                <button
+                  key={index}
+                  className={buttonClass}
+                  onClick={() => handleFillBlanksAnswerClick(opcao)}
+                  disabled={selectedAnswer !== null}
+                >
+                  {opcao}
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedAnswer !== null && (
+            <div className={`mt-6 p-4 rounded-lg flex items-center justify-between ${isAnswerCorrect ? 'bg-green-50' : 'bg-red-50'}`}>
+              <div className="flex items-center">
+                <div className="mr-3">
+                    {isAnswerCorrect ? <CheckCircle className="text-green-500" size={32} /> : <XCircle className="text-red-500" size={32} />}
+                </div>
+                <p className={`font-bold text-lg ${isAnswerCorrect ? 'text-green-800' : 'text-red-800'}`}>
+                    {isAnswerCorrect ? 'Excelente! Você acertou.' : `Ops! A resposta correta era: ${conteudo.frases[currentQuestion].palavraCorreta}`}
+                </p>
+              </div>
+              <button
+                onClick={handleNextQuestion}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg whitespace-nowrap"
+              >
+                Próxima →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* FLASHCARD INTERFACE */}
       {atividade.tipo === 'FLASHCARD' && !showResult && (
         <div className="bg-white rounded-xl shadow-lg p-6 md:p-10 border-t-8 border-blue-500">
@@ -239,6 +353,14 @@ export default function GamePlayer() {
             <div className="bg-gray-50 rounded-lg p-6 mb-8 inline-block">
               <p className="text-lg text-gray-700">Você acertou</p>
               <p className="text-5xl font-bold text-purple-600 my-2">{score} de {conteudo.questoes.length}</p>
+              <p className="text-sm text-gray-500">Sua nota foi enviada ao professor!</p>
+            </div>
+          )}
+
+          {atividade.tipo === 'FILL_BLANKS' && (
+            <div className="bg-gray-50 rounded-lg p-6 mb-8 inline-block">
+              <p className="text-lg text-gray-700">Você acertou</p>
+              <p className="text-5xl font-bold text-green-600 my-2">{score} de {conteudo.frases.length}</p>
               <p className="text-sm text-gray-500">Sua nota foi enviada ao professor!</p>
             </div>
           )}

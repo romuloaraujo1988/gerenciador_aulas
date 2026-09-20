@@ -23,7 +23,7 @@ async function runTests() {
 
         // 3. Create Student
         console.log('3. Creating Student...');
-        const studentRes = await axios.post(`${API_URL}/alunos`, { nome: 'Joãozinho Silva', turmaId: turma.id });
+        const studentRes = await axios.post(`${API_URL}/alunos`, { nome: 'Joãozinho Silva', login: 'joaozinho.silva', senha: '123', turmaId: turma.id });
         const student = studentRes.data;
         assert(student.id, 'Student should have an ID');
         console.log('   [OK] Student created:', student.nome);

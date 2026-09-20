@@ -4,8 +4,10 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const prisma = new PrismaClient();
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_123';
 const app = express();
 
 app.use(cors());
@@ -131,6 +133,20 @@ app.post('/api/configuracoes', async (req, res) => {
   res.json(config);
 });
 
+// --- Middleware Autenticação ---
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token == null) return res.sendStatus(401);
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
+
 // --- Login de Aluno ---
 app.post('/api/auth/aluno', async (req, res) => {
   const { login, senha } = req.body;
@@ -157,9 +173,38 @@ app.post('/api/auth/aluno', async (req, res) => {
       }
   }
 
+  const token = jwt.sign(
+    { id: aluno.id, nome: aluno.nome, turmaId: aluno.turmaId },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+
   // Remove a senha antes de enviar para o frontend
   const { senha: _, ...alunoSemSenha } = aluno;
-  res.json(alunoSemSenha);
+  res.json({ aluno: alunoSemSenha, token });
+});
+
+// --- Atualizar Senha do Aluno ---
+app.put('/api/alunos/senha', authenticateToken, async (req, res) => {
+  const { senhaAtual, novaSenha } = req.body;
+  const alunoId = req.user.id;
+
+  const aluno = await prisma.aluno.findUnique({ where: { id: alunoId } });
+  if (!aluno) return res.status(404).json({ error: 'Aluno não encontrado' });
+
+  const validPassword = await bcrypt.compare(senhaAtual, aluno.senha);
+  if (!validPassword && aluno.senha !== senhaAtual) {
+      return res.status(401).json({ error: 'Senha atual incorreta' });
+  }
+
+  const hashedSenha = await bcrypt.hash(novaSenha, 10);
+
+  await prisma.aluno.update({
+    where: { id: alunoId },
+    data: { senha: hashedSenha }
+  });
+
+  res.json({ message: 'Senha atualizada com sucesso' });
 });
 
 // --- IA: Gerar Atividade ---
@@ -209,6 +254,20 @@ app.post('/api/ia/gerar-atividade', async (req, res) => {
         ]
       }
       Certifique-se de incluir no mínimo 5 e no máximo 8 cards.`;
+    } else if (tipo === 'FILL_BLANKS') {
+      prompt = `Crie um exercício de preencher lacunas para adolescentes de ${faixaEtaria} sobre o tema "${tema}".
+      Retorne APENAS um JSON válido no seguinte formato:
+      {
+        "titulo": "Nome da Atividade",
+        "frases": [
+          {
+            "textoComLacuna": "O Brasil foi descoberto em ___ por Pedro Álvares Cabral.",
+            "palavraCorreta": "1500",
+            "opcoesFalsas": ["1492", "1530", "1822"]
+          }
+        ]
+      }
+      Certifique-se de incluir no mínimo 3 e no máximo 5 frases. O 'textoComLacuna' deve conter EXATAMENTE três underscores '___' onde a palavra deve ser inserida.`;
     } else {
       return res.status(400).json({ error: 'Tipo de atividade não suportado' });
     }
@@ -236,7 +295,7 @@ app.get('/api/atividades/:id', async (req, res) => {
 });
 
 app.post('/api/atividades', async (req, res) => {
-  const { nome, data, bimestre, categoria, valorMaximo, disciplinaId, tipo, conteudo } = req.body;
+  const { nome, data, bimestre, categoria, valorMaximo, disciplinaId, tipo, conteudo, permiteVariasTentativas } = req.body;
   const atividade = await prisma.atividade.create({
     data: {
       nome,
@@ -246,7 +305,8 @@ app.post('/api/atividades', async (req, res) => {
       valorMaximo: Number(valorMaximo),
       disciplinaId: Number(disciplinaId),
       tipo,
-      conteudo: conteudo ? JSON.stringify(conteudo) : null
+      conteudo: conteudo ? JSON.stringify(conteudo) : null,
+      permiteVariasTentativas: permiteVariasTentativas || false
     }
   });
   res.json(atividade);
@@ -266,15 +326,31 @@ app.get('/api/disciplinas/:id/atividades', async (req, res) => {
 app.post('/api/notas', async (req, res) => {
   const { valor, alunoId, atividadeId } = req.body;
 
+  // Obter detalhes da atividade
+  const atividade = await prisma.atividade.findUnique({ where: { id: Number(atividadeId) } });
+  if (!atividade) return res.status(404).json({ error: 'Atividade não encontrada' });
+
   // Check if grade exists
   const existing = await prisma.nota.findFirst({
     where: { alunoId: Number(alunoId), atividadeId: Number(atividadeId) }
   });
 
   if (existing) {
+    // Se a atividade for um jogo/IA e NÃO permitir várias tentativas, rejeitamos a atualização
+    // A menos que seja um professor editando via sistema (para simplificar, checamos pelo tipo)
+    // Se 'tipo' existir, é jogo de IA. Se a regra for false, ignorar nova nota e retornar a existente
+    // Porém, se for maior a nota, podemos salvar a maior nota. Vamos seguir a regra de rejeitar se permiteVariasTentativas = false
+    if (atividade.tipo && !atividade.permiteVariasTentativas) {
+       return res.status(403).json({ error: 'Atividade não permite múltiplas tentativas. Apenas a primeira nota é válida.', notaAtual: existing.valor });
+    }
+
+    // Se permitir (ou for professor atualizando atividade normal), sobrescreve com a nota mais alta?
+    // Em jogos vamos gravar a maior nota alcançada. Se for professor (atividade normal), sobrescrevemos.
+    const newValor = atividade.tipo && atividade.permiteVariasTentativas ? Math.max(existing.valor, Number(valor)) : Number(valor);
+
     const updated = await prisma.nota.update({
       where: { id: existing.id },
-      data: { valor: Number(valor) }
+      data: { valor: newValor }
     });
     return res.json(updated);
   }
@@ -336,6 +412,58 @@ app.get('/api/disciplinas/:id/chamadas', async (req, res) => {
         orderBy: { data: 'desc' }
     });
     res.json(chamadas);
+});
+
+// --- Gamificação / Ranking ---
+app.get('/api/turmas/:id/ranking', async (req, res) => {
+    const { id } = req.params;
+
+    // Obter todos os alunos da turma
+    const alunos = await prisma.aluno.findMany({
+        where: { turmaId: Number(id) }
+    });
+
+    // Obter notas das atividades de IA (minijogos) para esses alunos
+    const notasIA = await prisma.nota.findMany({
+        where: {
+            aluno: { turmaId: Number(id) },
+            atividade: {
+                tipo: { in: ['QUIZ', 'FLASHCARD', 'FILL_BLANKS'] }
+            }
+        },
+        include: { atividade: true }
+    });
+
+    const ranking = alunos.map(aluno => {
+        let pontosXP = 0;
+        let jogosCompletos = 0;
+
+        const notasDoAluno = notasIA.filter(n => n.alunoId === aluno.id);
+
+        notasDoAluno.forEach(nota => {
+            pontosXP += (nota.valor * 100); // Multiplicador para dar sensação de 'XP' de jogo
+            jogosCompletos += 1;
+        });
+
+        let nivel = 1;
+        if (pontosXP > 1000) nivel = 2;
+        if (pontosXP > 2500) nivel = 3;
+        if (pontosXP > 5000) nivel = 4;
+        if (pontosXP > 10000) nivel = 5;
+
+        return {
+            alunoId: aluno.id,
+            nome: aluno.nome,
+            pontosXP,
+            jogosCompletos,
+            nivel
+        };
+    });
+
+    // Ordenar do maior para o menor XP
+    ranking.sort((a, b) => b.pontosXP - a.pontosXP);
+
+    res.json(ranking);
 });
 
 // --- Boletim / Relatório Final ---
